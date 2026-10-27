@@ -33,14 +33,11 @@
     import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
     const params = {
-      margin: 12,
-      smooth: 3,
-      alphaCutoff: 20,
-      frontThickness: 0.15,
-      backThickness: 0.3,
-      bevel: 0.02,
-      transmission: 0.95,
-      roughness: 0.05
+      margin: 12, smooth: 3, alphaCutoff: 20,
+      frontThickness: 0.15, backThickness: 0.3, bevel: 0.02,
+      transmission: 1, roughness: 0,
+      backMode: 'mirror', backSolidColor: '#c53030',
+      scale: 1, offX: 0, offY: 0
     };
 
     const container = document.getElementById('container');
@@ -65,10 +62,16 @@
     const d1 = new THREE.DirectionalLight(0xffffff, 2.0); d1.position.set(5, 8, 5); scene.add(d1);
     const d2 = new THREE.DirectionalLight(0xffffff, 1.5); d2.position.set(-5, -5, -5); scene.add(d2);
 
-    const img = new Image();
-    img.src = "./image.png";
-    img.onload = () => {
-      buildModel(img);
+    const imgFront = new Image();
+    imgFront.src = "./image_front.png";
+    imgFront.onload = () => {
+      if (false) {
+        const imgBack = new Image();
+        imgBack.src = "./image_back.png";
+        imgBack.onload = () => buildModel(imgFront, imgBack);
+      } else {
+        buildModel(imgFront, null);
+      }
     };
 
     function generateShape(img, margin, alphaCutoff, smoothIterations) {
@@ -166,8 +169,8 @@
       return { shape, width: w, height: h };
     }
 
-    function buildModel(img) {
-      const { shape, width, height } = generateShape(img, params.margin, params.alphaCutoff, params.smooth);
+    function buildModel(frontImg, backImg) {
+      const { shape, width, height } = generateShape(frontImg, params.margin, params.alphaCutoff, params.smooth);
       const group = new THREE.Group();
       const totalThickness = params.frontThickness + params.backThickness;
 
@@ -179,44 +182,94 @@
 
       const acrylicMat = new THREE.MeshPhysicalMaterial({
         color: 0xffffff, transmission: params.transmission, opacity: 1.0, transparent: true,
-        roughness: params.roughness, metalness: 0, ior: 1.49, thickness: totalThickness,
-        specularIntensity: 0.8, clearcoat: 0.8, clearcoatRoughness: 0.1, depthWrite: false, side: THREE.DoubleSide
+        roughness: params.roughness, metalness: 0, ior: 1.491, thickness: totalThickness,
+        specularIntensity: 0.3, clearcoat: 1.0, clearcoatRoughness: 0.0, depthWrite: false, side: THREE.DoubleSide
       });
       const acrylicMesh = new THREE.Mesh(acrylicGeo, acrylicMat);
-      acrylicMesh.renderOrder = 3;
+      acrylicMesh.renderOrder = 4;
       group.add(acrylicMesh);
 
       const zCenterOffset = (params.frontThickness - params.backThickness) / 2;
+      const imgGeo = new THREE.PlaneGeometry(width, height);
 
-      const texture = new THREE.Texture(img);
+      const texture = new THREE.Texture(frontImg);
       texture.colorSpace = THREE.SRGBColorSpace;
       texture.needsUpdate = true;
 
-      const imgGeo = new THREE.PlaneGeometry(width, height);
-      const imgMat = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: true, side: THREE.FrontSide });
-      const imgMesh = new THREE.Mesh(imgGeo, imgMat);
-      imgMesh.position.z = zCenterOffset + 0.001;
-      imgMesh.renderOrder = 2;
-      group.add(imgMesh);
+      const frontMat = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: true, side: THREE.FrontSide });
+      const frontMesh = new THREE.Mesh(imgGeo, frontMat);
+      frontMesh.position.z = zCenterOffset + 0.001;
+      frontMesh.renderOrder = 3;
+      group.add(frontMesh);
 
+      // 白墨
       const wCanvas = document.createElement('canvas');
-      wCanvas.width = img.width; wCanvas.height = img.height;
+      wCanvas.width = frontImg.width; wCanvas.height = frontImg.height;
       const wCtx = wCanvas.getContext('2d');
-      wCtx.drawImage(img, 0, 0);
-      const wData = wCtx.getImageData(0, 0, img.width, img.height);
+      wCtx.drawImage(frontImg, 0, 0);
+      const wData = wCtx.getImageData(0, 0, frontImg.width, frontImg.height);
       for (let i = 0; i < wData.data.length; i += 4) {
-        if (wData.data[i + 3] > 10) { wData.data[i]=255; wData.data[i+1]=255; wData.data[i+2]=255; wData.data[i+3]=255; }
-        else { wData.data[i+3] = 0; }
+        if (wData.data[i + 3] > 20) { wData.data[i]=255; wData.data[i+1]=255; wData.data[i+2]=255; wData.data[i+3]=255; }
+        else wData.data[i+3] = 0;
       }
       wCtx.putImageData(wData, 0, 0);
       const whiteTex = new THREE.CanvasTexture(wCanvas);
       whiteTex.colorSpace = THREE.SRGBColorSpace;
+      whiteTex.needsUpdate = true;
 
-      const whiteMat = new THREE.MeshBasicMaterial({ map: whiteTex, transparent: true, depthWrite: true, side: THREE.BackSide });
+      const whiteMat = new THREE.MeshBasicMaterial({ map: whiteTex, transparent: true, depthWrite: true, side: THREE.DoubleSide });
       const whiteMesh = new THREE.Mesh(imgGeo, whiteMat);
-      whiteMesh.position.z = zCenterOffset - 0.001;
-      whiteMesh.renderOrder = 1;
+      whiteMesh.position.z = zCenterOffset;
+      whiteMesh.renderOrder = 2;
       group.add(whiteMesh);
+
+      let backTex;
+      if (params.backMode === 'color') {
+        const bCanvas = document.createElement('canvas');
+        bCanvas.width = frontImg.width; bCanvas.height = frontImg.height;
+        const bCtx = bCanvas.getContext('2d');
+        bCtx.drawImage(frontImg, 0, 0);
+        const bData = bCtx.getImageData(0, 0, frontImg.width, frontImg.height);
+        const c = new THREE.Color(params.backSolidColor);
+        const r = Math.round(c.r*255), g = Math.round(c.g*255), b = Math.round(c.b*255);
+        for (let i = 0; i < bData.data.length; i += 4) {
+          if (bData.data[i + 3] > 20) { bData.data[i]=r; bData.data[i+1]=g; bData.data[i+2]=b; bData.data[i+3]=255; }
+          else bData.data[i+3] = 0;
+        }
+        bCtx.putImageData(bData, 0, 0);
+        backTex = new THREE.CanvasTexture(bCanvas);
+      } else if (params.backMode === 'custom' && backImg) {
+        const bCanvas = document.createElement('canvas');
+        bCanvas.width = frontImg.width; bCanvas.height = frontImg.height;
+        const bCtx = bCanvas.getContext('2d');
+        const bw = frontImg.width * params.scale;
+        const bh = (frontImg.width * (backImg.height / backImg.width)) * params.scale;
+        const bx = (frontImg.width - bw) / 2 + (params.offX * frontImg.width);
+        const by = (frontImg.height - bh) / 2 - (params.offY * frontImg.height);
+        bCtx.drawImage(backImg, bx, by, bw, bh);
+
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = frontImg.width; tempCanvas.height = frontImg.height;
+        const tCtx = tempCanvas.getContext('2d');
+        tCtx.drawImage(frontImg, 0, 0);
+        const fPixels = tCtx.getImageData(0, 0, frontImg.width, frontImg.height).data;
+        const bPixels = bCtx.getImageData(0, 0, frontImg.width, frontImg.height);
+        for (let i = 0; i < bPixels.data.length; i += 4) {
+          if (fPixels[i + 3] <= 20) bPixels.data[i + 3] = 0;
+        }
+        bCtx.putImageData(bPixels, 0, 0);
+        backTex = new THREE.CanvasTexture(bCanvas);
+      } else {
+        backTex = new THREE.Texture(frontImg);
+      }
+      backTex.colorSpace = THREE.SRGBColorSpace;
+      backTex.needsUpdate = true;
+
+      const backMat = new THREE.MeshBasicMaterial({ map: backTex, transparent: true, depthWrite: true, side: THREE.BackSide });
+      const backMesh = new THREE.Mesh(imgGeo, backMat);
+      backMesh.position.z = zCenterOffset - 0.001;
+      backMesh.renderOrder = 1;
+      group.add(backMesh);
 
       scene.add(group);
     }
